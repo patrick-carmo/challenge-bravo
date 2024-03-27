@@ -1,22 +1,41 @@
 import env from "../config/envConfig";
 import redis from "../database/redis";
-import {
-    Currencies,
-    CurrenciesFetch,
-    CurrencyFetch,
-    Currency,
-} from "../types/currency";
+import knex from "../database/postgres";
+import { CurrencyFetch, Currency, ConversionInfo } from "../types/currency";
 import { utilsCurrency } from "../utils/utilsCurrency";
 
-const getCurrencies = async (): Promise<Currencies> => {
+const getSupportedCurrencies = async (): Promise<string[]> => {
     try {
-        const currenciesRedis = await redis.get(env.KEY);
+        const supportedCurrencies = await redis.get(`${env.KEY}-supported`);
 
-        if (currenciesRedis) {
-            return JSON.parse(currenciesRedis) as Currencies;
+        if (supportedCurrencies) {
+            return JSON.parse(supportedCurrencies);
         }
 
-        const supportedCurrencies = env.SUPPORTED_CURRENCIES;
+        const currencies = await knex<Currency>("currency")
+            .select("code")
+            .then((data) => data.map((currency) => currency.code));
+
+        if (currencies.length) {
+            utilsCurrency.insertCurrencyOnRedis(`${env.KEY}-supported`, currencies);
+            return currencies;
+        }
+
+        return currencies;
+    } catch (error: any) {
+        throw new Error("Error fetching supported currencies");
+    }
+};
+
+const getCurrencies = async (): Promise<Currency[]> => {
+    try {
+        const currenciesRedis = await redis.get(env.KEY);
+        await redis.del(env.KEY);
+        if (currenciesRedis) {
+            return JSON.parse(currenciesRedis) as Currency[];
+        }
+
+        const supportedCurrencies = await getSupportedCurrencies();
 
         const response: Response = await fetch(
             "https://economia.awesomeapi.com.br/json/all"
@@ -27,60 +46,14 @@ const getCurrencies = async (): Promise<Currencies> => {
             throw new Error("Error fetching currencies");
         }
 
-        const data = responseData as CurrenciesFetch;
+        const data = responseData as { [key: string]: CurrencyFetch };
 
-        const filteredCurrencies: Currencies = Object.keys(data).reduce(
-            (filtered: any, key: string) => {
-                if (supportedCurrencies.includes(key)) {
-                    const currencyFetch: CurrencyFetch = data[key];
+        const filteredCurrencies: Currency[] = utilsCurrency.processAndStoreCurrencies(data, supportedCurrencies);
 
-                    filtered[key] = {
-                        code: currencyFetch.code,
-                        name: currencyFetch.name.split("/")[0],
-                        value: utilsCurrency.formatNumber(
-                            key === "USD" ? 1 : currencyFetch.bid / data.USD.bid
-                        ),
-                    };
-
-                    redis
-                        .set(
-                            `${env.KEY}-${key}`,
-                            JSON.stringify(filtered[key]),
-                            {
-                                EX: 60 * 10,
-                            }
-                        )
-                        .catch(() => {
-                            throw new Error("Error saving currency");
-                        });
-                }
-                return filtered;
-            },
-            {}
-        );
-
-        filteredCurrencies.BRL = {
-            code: "BRL",
-            name: "Real",
-            value: utilsCurrency.formatNumber(
-                filteredCurrencies.USD.value / data.USD.bid
-            ),
-        };
-
-        await redis.set(
-            `${env.KEY}-BRL`,
-            JSON.stringify(filteredCurrencies.BRL),
-            {
-                EX: 60 * 10,
-            }
-        );
-
-        await redis.set(env.KEY, JSON.stringify(filteredCurrencies), {
-            EX: 60 * 10,
-        });
+        utilsCurrency.insertCurrencyOnRedis(env.KEY, filteredCurrencies);
 
         return filteredCurrencies;
-    } catch (error: any) {
+    } catch {
         throw new Error("Error fetching currencies");
     }
 };
@@ -93,17 +66,47 @@ const getCurrency = async (code: string): Promise<Currency> => {
             return JSON.parse(currencyRedis) as Currency;
         }
 
-        const currencies: Currencies = await getCurrencies();
+        const currencies: Currency[] = await getCurrencies();
 
-        const currency = currencies[code];
+        const currency = currencies.find((currency) => currency.code === code);
+
+        if (!currency) {
+            throw new Error("Currency not found");
+        }
 
         return currency;
-    } catch (error: any) {
+    } catch {
         throw new Error("Error fetching currency");
+    }
+};
+
+const getConversion = async (
+    from: string,
+    to: string,
+    amount: number
+): Promise<ConversionInfo> => {
+    try {
+        const currencyFrom = await getCurrency(from);
+        const currencyTo = await getCurrency(to);
+
+        const conversion = (currencyFrom.value / currencyTo.value) * amount;
+
+        const conversionInfo: ConversionInfo = {
+            from,
+            to,
+            amount,
+            conversion: `${conversion} ${to}`,
+        };
+
+        return conversionInfo;
+    } catch {
+        throw new Error("Error fetching conversion");
     }
 };
 
 export const currencyService = {
     getCurrencies,
     getCurrency,
+    getConversion,
+    getSupportedCurrencies,
 };

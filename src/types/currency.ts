@@ -12,16 +12,15 @@ export type CurrencyFetch = {
   create_date: string;
 }
 
-export type CurrenciesFetch = {
-  [key: string]: CurrencyFetch
-}
-
 export type Currency = {
   name: string
   code: string
   value: number
 }
 
-export type Currencies = {
-  [key: string]: Currency
+export type ConversionInfo = {
+  from: string
+  to: string
+  amount: number
+  conversion: string
 }

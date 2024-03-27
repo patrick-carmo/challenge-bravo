@@ -3,7 +3,7 @@ import env from "./config/envConfig";
 import express from "express";
 import redis from "./database/redis";
 
-import currencyRoutes from "./routes/currencyRoutes";
+import currencyRoutes from "./routes/currencyRoute";
 
 redis.connect();
 
