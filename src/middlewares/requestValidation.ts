@@ -4,15 +4,10 @@ import { ObjectSchema } from "joi";
 const requestValidation =
     (schema: ObjectSchema) =>
     async (req: Request, res: Response, next: NextFunction) => {
-        const body = Object.keys(req.body).length
-        const params = Object.keys(req.params).length
-        const query = Object.keys(req.query).length
-        if (
-            req.method !== "GET" &&
-            !body &&
-            !params &&
-            !query
-        ) {
+        const body = Object.keys(req.body).length;
+        const params = Object.keys(req.params).length;
+        const query = Object.keys(req.query).length;
+        if (req.method !== "GET" && !body && !params && !query) {
             return res
                 .status(400)
                 .json({ message: "Please fill out all the fields" });

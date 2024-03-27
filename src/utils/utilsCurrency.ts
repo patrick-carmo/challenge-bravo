@@ -9,49 +9,46 @@ const formatNumber = (value: number): number => {
     return Number(formatted);
 };
 
-const processAndStoreCurrencies = (
+const processAndStoreCurrencies = async (
     data: { [key: string]: CurrencyFetch },
     supportedCurrencies: string[]
-): Currency[] => {
-    const filteredCurrencies: Currency[] = Object.keys(data).reduce(
-        (filtered: Currency[], key: string) => {
-            if (supportedCurrencies.includes(key)) {
-                const currencyFetch: CurrencyFetch = data[key];
+) => {
+    const insertions: Promise<void>[] = [];
+    const filteredCurrencies: Currency[] = [];
 
-                const currency: Currency = {
-                    code: currencyFetch.code,
-                    name: currencyFetch.name.split("/")[0],
-                    value: utilsCurrency.formatNumber(
-                        key === "USD"
-                            ? 1
-                            : Number(currencyFetch.bid / data.USD.bid)
-                    ),
-                };
+    for (const [key, currencyFetch] of Object.entries(data)) {
+        if (!supportedCurrencies.includes(key)) continue;
 
-                filtered.push(currency);
+        const currency: Currency = {
+            code: currencyFetch.code,
+            name: currencyFetch.name.split("/")[0],
+            value:
+                key === "USD"
+                    ? 1
+                    : formatNumber(currencyFetch.bid / data.USD.bid),
+        };
 
-                utilsCurrency.insertCurrencyOnDb(currency);
-                utilsCurrency.insertCurrencyOnRedis(
-                    `${env.KEY}-${key}`,
-                    currency
-                );
-            }
-            return filtered;
-        },
-        []
-    );
+        filteredCurrencies.push(currency);
+        insertions.push(insertCurrencyOnDb(currency));
+    }
 
     const brlCurrency: Currency = {
         code: "BRL",
-        name: "Real",
-        value: utilsCurrency.formatNumber(1 / data.USD.bid),
+        name: "Real Brasileiro",
+        value: formatNumber(1 / data.USD.bid),
     };
-    utilsCurrency.insertCurrencyOnDb(brlCurrency);
 
-    filteredCurrencies.push(brlCurrency);
-    utilsCurrency.insertCurrencyOnRedis(`${env.KEY}-BRL`, brlCurrency);
+    insertions.push(insertCurrencyOnDb(brlCurrency));
 
-    return filteredCurrencies;
+    await Promise.all(insertions);
+
+    const currencies = await knex<Currency>("currency").select(
+        "code",
+        "name",
+        "value"
+    );
+
+    return currencies;
 };
 
 const insertCurrencyOnDb = async (currency: Currency): Promise<void> => {
@@ -64,16 +61,18 @@ const insertCurrencyOnDb = async (currency: Currency): Promise<void> => {
             .update(currency)
             .where({ code: currency.code });
 
+        insertCurrencyOnRedis(`${env.KEY}-${currency.code}`, currency);
         return;
     }
 
     await knex<Currency>("currency").insert(currency);
+    insertCurrencyOnRedis(`${env.KEY}-${currency.code}`, currency);
 
     return;
 };
 
 const insertCurrencyOnRedis = async (key: string, data: any): Promise<void> => {
-    await redis.set(key, JSON.parse(data), { EX: 60 * 10 });
+    await redis.set(key, JSON.stringify(data), { EX: 60 * 10 });
 };
 
 export const utilsCurrency = {
