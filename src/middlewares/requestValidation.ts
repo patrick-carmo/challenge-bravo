@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { ObjectSchema } from "joi";
+import { BadRequestError } from "../utils/apiError";
 
 const requestValidation =
     (schema: ObjectSchema) =>
@@ -8,11 +9,8 @@ const requestValidation =
         const params = Object.keys(req.params).length;
         const query = Object.keys(req.query).length;
         if (req.method !== "GET" && !body && !params && !query) {
-            return res
-                .status(400)
-                .json({ message: "Please fill out all the fields" });
+            throw new BadRequestError("Please fill out all the fields");
         }
-
         try {
             if (body) {
                 await schema.validateAsync({ body: req.body });
@@ -26,7 +24,7 @@ const requestValidation =
 
             return next();
         } catch (error: any) {
-            return res.status(400).json({ message: error.message });
+            throw new BadRequestError(error.message);
         }
     };
 

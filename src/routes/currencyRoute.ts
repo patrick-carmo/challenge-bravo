@@ -2,7 +2,6 @@ import { Router } from "express";
 import { currencyController } from "../controllers/currencyController";
 import joi from "../middlewares/requestValidation";
 import { schema } from "../models/joiCurrency";
-import redis from "../database/redis";
 
 const route = Router();
 
